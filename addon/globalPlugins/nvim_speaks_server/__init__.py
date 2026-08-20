@@ -1,6 +1,8 @@
 import json
 import socket
 import threading
+import wave
+from pathlib import Path
 from typing import Optional
 
 import globalPluginHandler
@@ -17,6 +19,7 @@ from speech.commands import (
 	PitchCommand,
 	RateCommand,
 	VolumeCommand,
+	WaveFileCommand,
 )
 from scriptHandler import script
 from speech.priorities import SpeechPriority
@@ -27,18 +30,15 @@ PORT = 7533
 BACKEND = "nvda-addon"
 RECV_BYTES = 16384
 JOIN_TIMEOUT = 2.0
-EARCONS = {
-	"cap": [(880, 60)],
-	"cursor": [(520, 25)],
-	"boundary": [(220, 100)],
-	"completion_open": [(600, 40)],
-	"completion_accept": [(700, 60)],
-	"completion_dismiss": [(300, 40)],
-	"fold_closed": [(392, 35), (415, 35), (440, 45)],
-	"fold_open": [(392, 35), (523, 40), (659, 55)],
-	"fold_close": [(659, 35), (523, 40), (392, 55)],
-	"fold_none": [(180, 45)],
-}
+EARCON_DIR = Path(__file__).with_name("earcons")
+
+
+def _wav_duration_ms(path: Path) -> int:
+	with wave.open(str(path), "rb") as wav:
+		return int(round(wav.getnframes() * 1000 / wav.getframerate()))
+
+
+EARCONS = {path.stem: (str(path), _wav_duration_ms(path)) for path in sorted(EARCON_DIR.glob("*.wav"))}
 
 
 def _number(value) -> Optional[float]:
@@ -128,8 +128,10 @@ def _sequence_from_commands(sequence, fallback_text: str) -> list:
 		elif cmd == "earcon":
 			earcon_id = item.get("id")
 			if isinstance(earcon_id, str) and (earcon := EARCONS.get(earcon_id)) is not None:
-				for hz, ms in earcon:
-					out.append(BeepCommand(hz, ms))
+				earcon_path, duration_ms = earcon
+				out.append(WaveFileCommand(earcon_path))
+				if item.get("blocking") is not False:
+					out.append(BreakCommand(time=duration_ms))
 		elif cmd == "char_mode":
 			if isinstance(item.get("on"), bool):
 				out.append(CharacterModeCommand(item["on"]))
